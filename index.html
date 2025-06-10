@@ -63,6 +63,12 @@
             min-width: 200px;
             text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
         }
+        #level {
+            font-size: 1rem;
+            font-weight: 400;
+            color: #fff;
+            margin-top: 0.25rem;
+        }
     </style>
 </head>
 <body class="bg-gray-900 flex items-center justify-center h-screen">
@@ -73,6 +79,7 @@
             <h1 class="title">Glowing Adventure</h1>
             <p class="instructions">You are Luma. Hold the mouse button to trace a path of light. Return to your territory to reclaim land from the darkness. Avoid the red Flickers!</p>
             <div id="stats">Reclaimed: 0.00%</div>
+            <div id="level">Level 1</div>
         </div>
         <!-- The Game Canvas -->
         <canvas id="gameCanvas"></canvas>
@@ -82,11 +89,21 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const statsEl = document.getElementById('stats');
+        const levelEl = document.getElementById('level');
 
         // --- Game Configuration ---
         const GRID_SIZE = 40; // The world is a grid; smaller number means higher resolution
         const PLAYER_SPEED = 0.08;
-        const ENEMY_SPEED = 1.5;
+
+        // --- Level Configuration ---
+        const levels = [
+            { numEnemies: 1, enemySpeed: 0.5 },
+            { numEnemies: 3, enemySpeed: 1.2 },
+            { numEnemies: 5, enemySpeed: 1.5 }
+        ];
+        let currentLevel = 0;
+        let currentEnemySpeed = levels[0].enemySpeed;
+        let currentNumEnemies = levels[0].numEnemies;
 
         let gridWidth, gridHeight;
         let gameGrid = [];
@@ -104,7 +121,6 @@
         
         // --- Enemy State ---
         let enemies = [];
-        const NUM_ENEMIES = 5;
 
         // --- Game State Enum ---
         const TILE = {
@@ -160,10 +176,14 @@
 
             // Spawn enemies
             enemies = [];
-            for (let i = 0; i < NUM_ENEMIES; i++) {
+            const level = levels[currentLevel];
+            currentEnemySpeed = level.enemySpeed;
+            currentNumEnemies = level.numEnemies;
+            for (let i = 0; i < currentNumEnemies; i++) {
                 spawnEnemy();
             }
 
+            updateStats();
             // Start the game loop
             gameLoop();
         }
@@ -180,8 +200,8 @@
             enemies.push({
                 x: x,
                 y: y,
-                vx: (Math.random() - 0.5) * ENEMY_SPEED,
-                vy: (Math.random() - 0.5) * ENEMY_SPEED,
+                vx: (Math.random() - 0.5) * currentEnemySpeed,
+                vy: (Math.random() - 0.5) * currentEnemySpeed,
                 particles: []
             });
         }
@@ -195,7 +215,7 @@
 
         canvas.addEventListener('mousedown', () => mouse.down = true);
         canvas.addEventListener('mouseup', () => mouse.down = false);
-        window.addEventListener('resize', init);
+        window.addEventListener('resize', () => init(currentLevel));
 
 
         // --- Player Logic ---
@@ -374,11 +394,26 @@
              for(const node of nodes) {
                  gameGrid[node.x][node.y] = TILE.OWNED;
              }
+             // Remove enemies caught inside the new territory
+             enemies = enemies.filter(enemy => {
+                 const ex = Math.floor(enemy.x / (GRID_SIZE/2));
+                 const ey = Math.floor(enemy.y / (GRID_SIZE/2));
+                 return !(ex >= 0 && ex < gridWidth && ey >= 0 && ey < gridHeight && gameGrid[ex][ey] === TILE.OWNED);
+             });
+             if (enemies.length === 0) nextLevel();
+        }
+
+        function nextLevel() {
+            if (currentLevel + 1 < levels.length) {
+                currentLevel++;
+            }
+            init(currentLevel);
         }
 
 
         // --- Enemy Logic ---
         function updateEnemies() {
+            let changed = false;
             enemies.forEach(enemy => {
                 // Move enemy
                 enemy.x += enemy.vx;
@@ -387,20 +422,24 @@
                 // Wall collision
                 if (enemy.x < 0 || enemy.x > canvas.width) enemy.vx *= -1;
                 if (enemy.y < 0 || enemy.y > canvas.height) enemy.vy *= -1;
-                
-                // Collision with player trail
-                if (player.isDrawing) {
-                    const ex = Math.floor(enemy.x / (GRID_SIZE/2));
-                    const ey = Math.floor(enemy.y / (GRID_SIZE/2));
-                    if (ex >= 0 && ex < gridWidth && ey >= 0 && ey < gridHeight) {
-                        if (gameGrid[ex][ey] === TILE.TRAIL) {
-                           cancelTrail();
-                           // Optional: Add a penalty effect here
-                        }
+
+                const ex = Math.floor(enemy.x / (GRID_SIZE/2));
+                const ey = Math.floor(enemy.y / (GRID_SIZE/2));
+                if (ex >= 0 && ex < gridWidth && ey >= 0 && ey < gridHeight) {
+                    // Eat player territory
+                    if (gameGrid[ex][ey] === TILE.OWNED) {
+                        gameGrid[ex][ey] = TILE.EMPTY;
+                        changed = true;
+                    }
+
+                    // Collision with player trail
+                    if (player.isDrawing && gameGrid[ex][ey] === TILE.TRAIL) {
+                        cancelTrail();
                     }
                 }
                 updateEnemyParticles(enemy);
             });
+            if (changed) updateStats();
         }
         
         function updateEnemyParticles(enemy) {
@@ -500,6 +539,7 @@
             }
             const percentage = (ownedCount / (gridWidth * gridHeight)) * 100;
             statsEl.textContent = `Reclaimed: ${percentage.toFixed(2)}%`;
+            levelEl.textContent = `Level ${currentLevel + 1}`;
         }
 
         // --- Main Game Loop ---
@@ -511,7 +551,7 @@
         }
 
         // --- Start ---
-        init();
+        init(0);
     </script>
 </body>
 </html>
