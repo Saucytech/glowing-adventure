@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glowing Adventure</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0a1a;
+            color: #e0e0e0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 100%;
+            max-width: 1200px;
+        }
+        canvas {
+            background-color: #1a1a2a;
+            cursor: none;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(76, 128, 255, 0.2);
+            width: 100%;
+            height: auto;
+            aspect-ratio: 16 / 9;
+        }
+        .ui-panel {
+            padding: 1rem 1.5rem;
+            background-color: rgba(26, 26, 42, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .title {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: 1px;
+            text-shadow: 0 0 15px rgba(120, 180, 255, 0.8);
+        }
+        .instructions {
+            font-size: 0.9rem;
+            color: #a0a0c0;
+            margin-top: 0.5rem;
+        }
+        #stats {
+            font-size: 1.1rem;
+            font-weight: 400;
+            color: #fff;
+            margin-top: 0.5rem;
+            min-width: 200px;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex items-center justify-center h-screen">
+
+    <div class="container p-4">
+        <!-- UI Panel for Title and Instructions -->
+        <div class="ui-panel">
+            <h1 class="title">Glowing Adventure</h1>
+            <p class="instructions">You are Luma. Hold the mouse button to trace a path of light. Return to your territory to reclaim land from the darkness. Avoid the red Flickers!</p>
+            <div id="stats">Reclaimed: 0.00%</div>
+        </div>
+        <!-- The Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const statsEl = document.getElementById('stats');
+
+        // --- Game Configuration ---
+        const GRID_SIZE = 40; // The world is a grid; smaller number means higher resolution
+        const PLAYER_SPEED = 0.08;
+        const ENEMY_SPEED = 1.5;
+
+        let gridWidth, gridHeight;
+        let gameGrid = [];
+
+        // --- Player State ---
+        const player = {
+            x: 0,
+            y: 0,
+            targetX: 0,
+            targetY: 0,
+            isDrawing: false,
+            trail: [],
+            particles: []
+        };
+        
+        // --- Enemy State ---
+        let enemies = [];
+        const NUM_ENEMIES = 5;
+
+        // --- Game State Enum ---
+        const TILE = {
+            EMPTY: 0,
+            OWNED: 1,
+            TRAIL: 2,
+            FILL_CHECK: 3
+        };
+
+        // --- Mouse State ---
+        const mouse = {
+            x: 0,
+            y: 0,
+            down: false
+        };
+
+        // --- Initialization ---
+        function init() {
+            // Set canvas resolution based on grid size
+            gridWidth = Math.floor(canvas.clientWidth / GRID_SIZE) * 2; // Increased resolution for smoother curves
+            gridHeight = Math.floor(canvas.clientHeight / GRID_SIZE) * 2;
+            canvas.width = gridWidth * (GRID_SIZE / 2);
+            canvas.height = gridHeight * (GRID_SIZE / 2);
+
+            // Initialize the game grid
+            gameGrid = Array(gridWidth).fill(0).map(() => Array(gridHeight).fill(TILE.EMPTY));
+
+            // Create initial player territory
+            const startSize = 8;
+            const startX = Math.floor(gridWidth / 2) - startSize / 2;
+            const startY = Math.floor(gridHeight / 2) - startSize / 2;
+            for (let i = startX; i < startX + startSize; i++) {
+                for (let j = startY; j < startY + startSize; j++) {
+                    if (i >= 0 && i < gridWidth && j >= 0 && j < gridHeight) {
+                        gameGrid[i][j] = TILE.OWNED;
+                    }
+                }
+            }
+            
+            // Set player start position
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            player.targetX = player.x;
+            player.targetY = player.y;
+
+            // Spawn enemies
+            enemies = [];
+            for (let i = 0; i < NUM_ENEMIES; i++) {
+                spawnEnemy();
+            }
+
+            // Start the game loop
+            gameLoop();
+        }
+
+        function spawnEnemy() {
+            let x, y, gx, gy;
+            do {
+                x = Math.random() * canvas.width;
+                y = Math.random() * canvas.height;
+                gx = Math.floor(x / (GRID_SIZE/2));
+                gy = Math.floor(y / (GRID_SIZE/2));
+            } while (gameGrid[gx] && gameGrid[gx][gy] === TILE.OWNED); // Don't spawn inside player territory
+
+            enemies.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * ENEMY_SPEED,
+                vy: (Math.random() - 0.5) * ENEMY_SPEED,
+                particles: []
+            });
+        }
+        
+        // --- Event Listeners ---
+        canvas.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousedown', () => mouse.down = true);
+        canvas.addEventListener('mouseup', () => mouse.down = false);
+        window.addEventListener('resize', init);
+
+
+        // --- Player Logic ---
+        function updatePlayer() {
+            // Smoothly move player towards the mouse target
+            player.targetX = mouse.x;
+            player.targetY = mouse.y;
+            player.x += (player.targetX - player.x) * PLAYER_SPEED;
+            player.y += (player.targetY - player.y) * PLAYER_SPEED;
+            
+            // Player grid position
+            const gx = Math.floor(player.x / (GRID_SIZE/2));
+            const gy = Math.floor(player.y / (GRID_SIZE/2));
+
+            // Boundary checks
+            if (gx < 0 || gx >= gridWidth || gy < 0 || gy >= gridHeight) return;
+
+            const onOwnedTerritory = gameGrid[gx][gy] === TILE.OWNED;
+
+            // Handle drawing logic
+            if (mouse.down) {
+                if (!player.isDrawing && !onOwnedTerritory) {
+                     // Can't start drawing outside territory
+                } else if (!player.isDrawing && onOwnedTerritory) {
+                    player.isDrawing = true;
+                    player.trail = [];
+                }
+            } else {
+                if (player.isDrawing) {
+                    // Mouse released, complete or cancel the trail
+                    if(onOwnedTerritory) {
+                        completeTrail();
+                    } else {
+                        cancelTrail();
+                    }
+                }
+            }
+
+            if (player.isDrawing) {
+                if (onOwnedTerritory && player.trail.length > 0) {
+                     // Reached friendly territory, complete the loop
+                     completeTrail();
+                } else {
+                    // Add to trail if not on owned land
+                    if (!onOwnedTerritory) {
+                        if (gameGrid[gx][gy] !== TILE.TRAIL) {
+                           gameGrid[gx][gy] = TILE.TRAIL;
+                           player.trail.push({x: gx, y: gy});
+                        }
+                    }
+                }
+            }
+            
+            updatePlayerParticles();
+        }
+
+        function updatePlayerParticles() {
+            // Add new particles
+            player.particles.push({
+                x: player.x,
+                y: player.y,
+                size: Math.random() * 3 + 2,
+                life: 30,
+                opacity: 0.8
+            });
+
+            // Update and filter particles
+            player.particles = player.particles.filter(p => {
+                p.life--;
+                p.opacity = Math.max(0, p.life / 30);
+                return p.life > 0;
+            });
+        }
+
+        function cancelTrail() {
+            player.isDrawing = false;
+            for (const point of player.trail) {
+                gameGrid[point.x][point.y] = TILE.EMPTY;
+            }
+            player.trail = [];
+        }
+
+        function completeTrail() {
+            player.isDrawing = false;
+            if (player.trail.length < 3) {
+                cancelTrail();
+                return;
+            }
+            
+            // Add the current player position to close the loop
+            const gx = Math.floor(player.x / (GRID_SIZE/2));
+            const gy = Math.floor(player.y / (GRID_SIZE/2));
+            player.trail.push({x: gx, y: gy});
+
+            // The magical flood fill part
+            floodFill();
+            
+            // Clear trail from grid data structure
+            for (const point of player.trail) {
+                if (gameGrid[point.x] && gameGrid[point.x][point.y] === TILE.TRAIL) {
+                   gameGrid[point.x][point.y] = TILE.OWNED;
+                }
+            }
+            player.trail = [];
+            updateStats();
+        }
+        
+        // --- Flood Fill Algorithm ---
+        function floodFill() {
+            // Find a point inside the enclosed area to start filling from
+            // This is a simple but effective heuristic: check a point slightly offset from the trail's midpoint
+            if (player.trail.length === 0) return;
+            const midIndex = Math.floor(player.trail.length / 2);
+            const p1 = player.trail[midIndex];
+            const p2 = player.trail[midIndex + 1] || player.trail[midIndex];
+
+            const nx = (p2.y - p1.y); // Normal vector
+            const ny = -(p2.x - p1.x);
+
+            const testX = p1.x + Math.sign(nx);
+            const testY = p1.y + Math.sign(ny);
+
+            // We do two flood fills: one from the "inside" and one from the "outside"
+            // The one that fills fewer tiles is the one we keep. This prevents filling the whole map.
+            const fill1 = fillFrom(testX, testY);
+            const fill2 = fillFrom(p1.x - Math.sign(nx), p1.y - Math.sign(ny));
+
+            if (fill1.count > 0 && (fill2.count === 0 || fill1.count < fill2.count)) {
+                applyFill(fill1.nodes);
+            } else if (fill2.count > 0) {
+                applyFill(fill2.nodes);
+            }
+        }
+
+        function fillFrom(startX, startY) {
+            let count = 0;
+            const filledNodes = [];
+            const q = [];
+
+            if (startX < 0 || startX >= gridWidth || startY < 0 || startY >= gridHeight) return {count: 0, nodes: []};
+            if (gameGrid[startX][startY] !== TILE.EMPTY) return {count: 0, nodes: []};
+
+            q.push({ x: startX, y: startY });
+            gameGrid[startX][startY] = TILE.FILL_CHECK;
+
+            let head = 0;
+            while(head < q.length) {
+                // Prevent infinite loops on massive fills (if something goes wrong)
+                if (q.length > gridWidth * gridHeight / 2) {
+                     // Clean up and exit if the fill is too large
+                    for(const node of q) gameGrid[node.x][node.y] = TILE.EMPTY;
+                    return { count: 0, nodes: [] };
+                }
+                const { x, y } = q[head++];
+                count++;
+                filledNodes.push({x,y});
+
+                const neighbors = [{dx:0, dy:1}, {dx:0, dy:-1}, {dx:1, dy:0}, {dx:-1, dy:0}];
+                for (const n of neighbors) {
+                    const nx = x + n.dx;
+                    const ny = y + n.dy;
+
+                    if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight && gameGrid[nx][ny] === TILE.EMPTY) {
+                        gameGrid[nx][ny] = TILE.FILL_CHECK;
+                        q.push({ x: nx, y: ny });
+                    }
+                }
+            }
+
+            // Reset the temporary fill check state
+            for(const node of filledNodes) gameGrid[node.x][node.y] = TILE.EMPTY;
+            return { count, nodes: filledNodes };
+        }
+
+        function applyFill(nodes) {
+             for(const node of nodes) {
+                 gameGrid[node.x][node.y] = TILE.OWNED;
+             }
+        }
+
+
+        // --- Enemy Logic ---
+        function updateEnemies() {
+            enemies.forEach(enemy => {
+                // Move enemy
+                enemy.x += enemy.vx;
+                enemy.y += enemy.vy;
+
+                // Wall collision
+                if (enemy.x < 0 || enemy.x > canvas.width) enemy.vx *= -1;
+                if (enemy.y < 0 || enemy.y > canvas.height) enemy.vy *= -1;
+                
+                // Collision with player trail
+                if (player.isDrawing) {
+                    const ex = Math.floor(enemy.x / (GRID_SIZE/2));
+                    const ey = Math.floor(enemy.y / (GRID_SIZE/2));
+                    if (ex >= 0 && ex < gridWidth && ey >= 0 && ey < gridHeight) {
+                        if (gameGrid[ex][ey] === TILE.TRAIL) {
+                           cancelTrail();
+                           // Optional: Add a penalty effect here
+                        }
+                    }
+                }
+                updateEnemyParticles(enemy);
+            });
+        }
+        
+        function updateEnemyParticles(enemy) {
+            // Add new particles
+            enemy.particles.push({
+                x: enemy.x,
+                y: enemy.y,
+                size: Math.random() * 2 + 1,
+                life: 20,
+                opacity: 0.7
+            });
+
+            // Update and filter particles
+            enemy.particles = enemy.particles.filter(p => {
+                p.life--;
+                p.opacity = Math.max(0, p.life / 20);
+                return p.life > 0;
+            });
+        }
+        
+        // --- Rendering ---
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const halfGrid = GRID_SIZE / 2;
+            
+            // Draw owned territory and trails
+            for (let x = 0; x < gridWidth; x++) {
+                for (let y = 0; y < gridHeight; y++) {
+                    if (gameGrid[x][y] === TILE.OWNED) {
+                        ctx.fillStyle = 'rgba(76, 128, 255, 0.25)';
+                        ctx.shadowColor = 'rgba(100, 150, 255, 0.8)';
+                        ctx.shadowBlur = 15;
+                        ctx.fillRect(x * halfGrid, y * halfGrid, halfGrid, halfGrid);
+                        ctx.shadowBlur = 0;
+                    } else if (gameGrid[x][y] === TILE.TRAIL) {
+                        ctx.fillStyle = 'rgba(180, 220, 255, 0.8)';
+                         ctx.shadowColor = 'rgba(200, 230, 255, 1)';
+                        ctx.shadowBlur = 10;
+                        ctx.fillRect(x * halfGrid, y * halfGrid, halfGrid, halfGrid);
+                         ctx.shadowBlur = 0;
+                    }
+                }
+            }
+
+            // Draw player particles (under the main wisp)
+            ctx.globalCompositeOperation = 'lighter';
+            player.particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(180, 220, 255, ${p.opacity})`;
+                ctx.fill();
+            });
+
+            // Draw player wisp
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#fff';
+            ctx.shadowBlur = 20;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.globalCompositeOperation = 'source-over';
+
+
+            // Draw enemies
+            enemies.forEach(enemy => {
+                 // Draw enemy particles
+                ctx.globalCompositeOperation = 'lighter';
+                enemy.particles.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 100, 100, ${p.opacity})`;
+                    ctx.fill();
+                });
+                
+                // Draw enemy core
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, 6, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff4141';
+                ctx.shadowColor = '#ff4141';
+                ctx.shadowBlur = 15;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.globalCompositeOperation = 'source-over';
+            });
+        }
+        
+        // --- Stats ---
+        function updateStats() {
+            let ownedCount = 0;
+            for (let x = 0; x < gridWidth; x++) {
+                for (let y = 0; y < gridHeight; y++) {
+                    if(gameGrid[x][y] === TILE.OWNED) {
+                        ownedCount++;
+                    }
+                }
+            }
+            const percentage = (ownedCount / (gridWidth * gridHeight)) * 100;
+            statsEl.textContent = `Reclaimed: ${percentage.toFixed(2)}%`;
+        }
+
+        // --- Main Game Loop ---
+        function gameLoop() {
+            updatePlayer();
+            updateEnemies();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Start ---
+        init();
+    </script>
+</body>
+</html>
