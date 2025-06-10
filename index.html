@@ -121,8 +121,16 @@
             down: false
         };
 
+        // Handle for the current requestAnimationFrame
+        let animationFrameId;
+
         // --- Initialization ---
         function init() {
+            // Cancel any existing game loop before starting a new one
+            if (animationFrameId !== undefined) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
             // Set canvas resolution based on grid size
             gridWidth = Math.floor(canvas.clientWidth / GRID_SIZE) * 2; // Increased resolution for smoother curves
             gridHeight = Math.floor(canvas.clientHeight / GRID_SIZE) * 2;
@@ -499,7 +507,7 @@
             updatePlayer();
             updateEnemies();
             draw();
-            requestAnimationFrame(gameLoop);
+            animationFrameId = requestAnimationFrame(gameLoop);
         }
 
         // --- Start ---
